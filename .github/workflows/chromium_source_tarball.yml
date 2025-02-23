@@ -1,0 +1,59 @@
+name: Create and release Chromium source tarball
+
+on:
+  workflow_dispatch:
+    inputs:
+      CHROMIUM_TAG:
+        description: Tag of Chromium
+        required: true
+
+jobs:
+  fetch_and_release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Mount workspace to /mnt
+        run: |
+          sudo mkdir /mnt/work
+          sudo mount --bind /mnt/work ${GITHUB_WORKSPACE}
+          sudo chown runner:runner ${GITHUB_WORKSPACE}
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch depot_tools
+        run: |
+          git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+          echo "${GITHUB_WORKSPACE}/depot_tools" >> "$GITHUB_PATH"
+
+      - name: Fetch Chromium source
+        run: |
+          gclient config --name src https://chromium.googlesource.com/chromium/src.git@${{ inputs.CHROMIUM_TAG }}
+          echo "target_os = [ 'linux' ]" >> .gclient
+          gclient sync --nohooks --no-history
+
+          src/build/util/lastchange.py -o src/build/util/LASTCHANGE
+          src/build/util/lastchange.py -m GPU_LISTS_VERSION --revision-id-only --header src/gpu/config/gpu_lists_version.h
+          src/build/util/lastchange.py -m SKIA_COMMIT_HASH -s src/third_party/skia --header src/skia/ext/skia_commit_hash.h
+          src/build/util/lastchange.py -s src/third_party/dawn --revision src/gpu/webgpu/DAWN_VERSION
+
+          touch src/chrome/test/data/webui/i18n_process_css_test.html
+
+          src/tools/update_pgo_profiles.py '--target=linux' update '--gs-url-base=chromium-optimization-profiles/pgo_profiles'
+
+      - name: Create Chromium source tarball
+        run: |
+          ./export_tarball.py --version --xz --test-data --remove-nonessential-files chromium-${{ inputs.CHROMIUM_TAG }} --progress --src-dir src/
+          mv chromium-${{ inputs.CHROMIUM_TAG }}.tar.xz chromium-${{ inputs.CHROMIUM_TAG }}-testdata.tar.xz
+          ./export_tarball.py --version --xz --remove-nonessential-files chromium-${{ inputs.CHROMIUM_TAG }} --progress --src-dir src/
+
+      - name: Release
+        uses: ncipollo/release-action@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          artifacts: "chromium-${{ inputs.CHROMIUM_TAG }}.tar.xz,chromium-${{ inputs.CHROMIUM_TAG }}-testdata.tar.xz"
+          commit: ${{ github.sha }}
+          tag: ${{ inputs.CHROMIUM_TAG }}
+          allowUpdates: true
