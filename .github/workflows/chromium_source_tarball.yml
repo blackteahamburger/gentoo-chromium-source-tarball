@@ -7,6 +7,11 @@ on:
         description: Tag of Chromium
         required: true
 
+      V8_PGO_PROFILE:
+        description: Download PGO Profile for V8 (for when v8_enable_builtins_optimization = true, Thorium specific)
+        type: boolean
+        default: true
+
 jobs:
   fetch_and_release:
     runs-on: ubuntu-latest
@@ -42,6 +47,10 @@ jobs:
           touch src/chrome/test/data/webui/i18n_process_css_test.html
 
           src/tools/update_pgo_profiles.py '--target=linux' update '--gs-url-base=chromium-optimization-profiles/pgo_profiles'
+
+      - name: Download PGO Profile for V8
+        if: ${{ inputs.V8_PGO_PROFILE }}
+        run: src/v8/tools/builtins-pgo/download_profiles.py --depot-tools=${GITHUB_WORKSPACE}/depot_tools --force download
 
       - name: Create Chromium source tarball
         run: |
